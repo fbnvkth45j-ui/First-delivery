@@ -68,7 +68,8 @@ export function createApp(opts = {}) {
     email: opts.adminEmail ?? env.ADMIN_EMAIL,
     password: opts.adminPassword ?? env.ADMIN_PASSWORD,
   });
-  const wantDemo = opts.demo ?? (!production && env.DEMO_DATA !== '0');
+  // Démo : activée par défaut hors production ; en production, seulement si DEMO_DATA=1 (période de test).
+  const wantDemo = opts.demo ?? (env.DEMO_DATA === '1' || (!production && env.DEMO_DATA !== '0'));
   const demoCreated = wantDemo ? seedDemo(db) : false;
 
   const tx = (fn) => {
