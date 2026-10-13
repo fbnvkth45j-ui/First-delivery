@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
   is_open     INTEGER NOT NULL DEFAULT 1,
   status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
   is_demo     INTEGER NOT NULL DEFAULT 0,
+  kind        TEXT NOT NULL DEFAULT 'repas',
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -93,6 +94,9 @@ export function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  // Migration : anciennes bases sans catégorie de commerce
+  const cols = db.prepare('PRAGMA table_info(restaurants)').all().map((c) => c.name);
+  if (!cols.includes('kind')) db.exec("ALTER TABLE restaurants ADD COLUMN kind TEXT NOT NULL DEFAULT 'repas'");
   return db;
 }
 
@@ -130,7 +134,7 @@ export function seedDemo(db) {
 
   const demo = [
     {
-      email: 'demo.awa@firstdelivery.local', owner: 'Awa (démo)',
+      email: 'demo.awa@firstdelivery.local', owner: 'Awa (démo)', kind: 'repas',
       name: 'Chez Maman Awa (démo)', address: 'Ouagadougou, secteur 15',
       description: 'Cuisine burkinabè traditionnelle, faite maison.',
       products: [
@@ -143,7 +147,7 @@ export function seedDemo(db) {
       ],
     },
     {
-      email: 'demo.burger@firstdelivery.local', owner: 'Burger (démo)',
+      email: 'demo.burger@firstdelivery.local', owner: 'Burger (démo)', kind: 'repas',
       name: 'Le Délice Burger (démo)', address: 'Ouagadougou, Ouaga 2000',
       description: 'Burgers, frites et boissons fraîches.',
       products: [
@@ -153,15 +157,27 @@ export function seedDemo(db) {
         ['Soda 33 cl', 'Canette fraîche', 600, 'Boissons'],
       ],
     },
+    {
+      email: 'demo.market@firstdelivery.local', owner: 'Marché (démo)', kind: 'quotidien',
+      name: 'Supérette Le Marché (démo)', address: 'Ouagadougou, Zogona',
+      description: 'Produits du quotidien : épicerie, boissons, hygiène.',
+      products: [
+        ['Riz parfumé 5 kg', 'Sac de riz parfumé', 4500, 'Épicerie'],
+        ['Huile végétale 1 L', 'Bouteille d’huile', 1500, 'Épicerie'],
+        ['Sucre 1 kg', 'Sucre en poudre', 800, 'Épicerie'],
+        ['Eau minérale 1,5 L', 'Bouteille d’eau', 500, 'Boissons'],
+        ['Savon de ménage', 'Pain de savon', 300, 'Hygiène'],
+      ],
+    },
   ];
 
   const insUser = db.prepare("INSERT INTO users (email, password_hash, name, phone, role) VALUES (?, ?, ?, ?, 'restaurant')");
-  const insResto = db.prepare("INSERT INTO restaurants (owner_id, name, description, address, status, is_demo) VALUES (?, ?, ?, ?, 'approved', 1)");
+  const insResto = db.prepare("INSERT INTO restaurants (owner_id, name, description, address, status, is_demo, kind) VALUES (?, ?, ?, ?, 'approved', 1, ?)");
   const insProd = db.prepare('INSERT INTO products (restaurant_id, name, description, price, category) VALUES (?, ?, ?, ?, ?)');
   const pwd = hashPassword('demo1234');
   for (const r of demo) {
     const uid = insUser.run(r.email, pwd, r.owner, '').lastInsertRowid;
-    const rid = insResto.run(uid, r.name, r.description, r.address).lastInsertRowid;
+    const rid = insResto.run(uid, r.name, r.description, r.address, r.kind).lastInsertRowid;
     for (const p of r.products) insProd.run(rid, p[0], p[1], p[2], p[3]);
   }
   return true;

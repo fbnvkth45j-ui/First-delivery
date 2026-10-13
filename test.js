@@ -52,12 +52,21 @@ await test('la page d’accueil est servie', async () => {
   const r = await anon('GET', '/');
   assert.equal(r.status, 200); assert.ok(r.type.includes('text/html'));
 });
-await test('2 restaurants de démo, sans données sensibles', async () => {
+await test('3 commerces de démo, sans données sensibles', async () => {
   const r = await anon('GET', '/api/restaurants');
-  assert.equal(r.data.restaurants.length, 2);
+  assert.equal(r.data.restaurants.length, 3);
   assert.ok(!JSON.stringify(r.data).includes('password'));
   ctx.awaId = r.data.restaurants.find((x) => x.name.includes('Awa')).id;
   ctx.burgerId = r.data.restaurants.find((x) => x.name.includes('Burger')).id;
+});
+await test('catégories : liste, filtre, catégorie inconnue refusée', async () => {
+  const cfg = await anon('GET', '/api/config');
+  assert.deepEqual(cfg.data.kinds.map((k) => k.id), ['repas', 'quotidien', 'autre']);
+  const q = await anon('GET', '/api/restaurants?kind=quotidien');
+  assert.equal(q.data.restaurants.length, 1); assert.equal(q.data.restaurants[0].kind, 'quotidien');
+  assert.equal((await anon('GET', '/api/restaurants?kind=repas')).data.restaurants.length, 2);
+  assert.equal((await anon('GET', '/api/restaurants?kind=autre')).data.restaurants.length, 0);
+  assert.equal((await anon('GET', '/api/restaurants?kind=nimporte')).status, 400);
 });
 await test('menu d’un restaurant avec prix', async () => {
   const r = await anon('GET', `/api/restaurants/${ctx.awaId}`);
@@ -264,8 +273,10 @@ await test('restaurant fermé : commande impossible ; réouverture', async () =>
 
 console.log('\nNouveau restaurant et administration');
 await test('un nouveau restaurant est invisible tant que l’administrateur ne l’a pas validé', async () => {
-  const r = await newResto('POST', '/api/auth/register', { role: 'restaurant', name: 'Issa Traoré', email: 'issa@test.local', password: 'motdepasse3', phone: '70 55 44 33', restaurantName: 'Maquis Chez Issa', restaurantAddress: 'Bobo-Dioulasso, secteur 1' });
+  const r = await newResto('POST', '/api/auth/register', { role: 'restaurant', name: 'Issa Traoré', email: 'issa@test.local', password: 'motdepasse3', phone: '70 55 44 33', restaurantName: 'Maquis Chez Issa', restaurantAddress: 'Bobo-Dioulasso, secteur 1', restaurantKind: 'repas' });
   assert.equal(r.status, 200);
+  const badKind = await client()('POST', '/api/auth/register', { role: 'restaurant', name: 'X Y', email: 'k@test.local', password: 'motdepasse3', phone: '70554433', restaurantName: 'Test', restaurantAddress: 'Bobo secteur 1', restaurantKind: 'armes' });
+  assert.equal(badKind.status, 400);
   const me = await newResto('GET', '/api/me');
   assert.equal(me.data.restaurant.status, 'pending'); ctx.issaId = me.data.restaurant.id;
   await newResto('POST', '/api/my/products', { name: 'Poisson braisé', price: 3500, category: 'Grillades' });

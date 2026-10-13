@@ -23,6 +23,7 @@ Aucune installation de bibliothèque n'est nécessaire.
 |---|---|---|
 | Restaurant | demo.awa@firstdelivery.local | demo1234 |
 | Restaurant | demo.burger@firstdelivery.local | demo1234 |
+| Supérette (produits du quotidien) | demo.market@firstdelivery.local | demo1234 |
 
 Les clients s'inscrivent eux-mêmes. Les restaurants de démo sont créés par défaut sur un ordinateur de test. En mode production (`NODE_ENV=production`, par exemple chez Render) ils sont **absents**, sauf si vous ajoutez `DEMO_DATA=1` pendant la période de test. `DEMO_DATA=0` les désactive toujours. **Retirez `DEMO_DATA` avant l'ouverture aux vrais clients** : leur mot de passe est public.
 

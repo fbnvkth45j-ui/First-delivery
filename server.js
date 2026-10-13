@@ -23,6 +23,14 @@ export const TRANSITIONS = {
   ready:     { cancelled: ['admin'] },
 };
 
+// Catégories de commerces. Pour en ajouter une : une ligne ici.
+export const KINDS = [
+  { id: 'repas', label: 'Repas', icon: '🍽️' },
+  { id: 'quotidien', label: 'Produits du quotidien', icon: '🛒' },
+  { id: 'autre', label: 'Autres', icon: '🛍️' },
+];
+const KIND_IDS = KINDS.map((k) => k.id);
+
 const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const SESSION_MS = 30 * 24 * 3600 * 1000;
 
@@ -146,7 +154,7 @@ export function createApp(opts = {}) {
     db.prepare('SELECT * FROM restaurants WHERE owner_id = ?').get(user.id);
   const toRestaurant = (r) => ({
     id: r.id, name: r.name, description: r.description, address: r.address, phone: r.phone,
-    imageUrl: r.image_url, isOpen: !!r.is_open, status: r.status, isDemo: !!r.is_demo,
+    imageUrl: r.image_url, isOpen: !!r.is_open, status: r.status, isDemo: !!r.is_demo, kind: r.kind,
   });
   const toProduct = (p) => ({
     id: p.id, restaurantId: p.restaurant_id, name: p.name, description: p.description,
@@ -189,13 +197,18 @@ export function createApp(opts = {}) {
   route('GET', '/api/health', null, () => ({ ok: true, time: new Date().toISOString() }));
 
   route('GET', '/api/config', null, () => ({
-    deliveryFee: config.deliveryFee, currency: config.currency,
+    deliveryFee: config.deliveryFee, currency: config.currency, kinds: KINDS,
     payment: { methods: ['cash_on_delivery'], note: 'Paiement en espèces à la livraison. Le Mobile Money sera ajouté plus tard.' },
   }));
 
-  route('GET', '/api/restaurants', null, () => ({
-    restaurants: db.prepare("SELECT * FROM restaurants WHERE status = 'approved' ORDER BY is_open DESC, name").all().map(toRestaurant),
-  }));
+  route('GET', '/api/restaurants', null, ({ query }) => {
+    const kind = query.get('kind');
+    if (kind && !KIND_IDS.includes(kind)) throw bad('Catégorie inconnue');
+    const rows = kind
+      ? db.prepare("SELECT * FROM restaurants WHERE status = 'approved' AND kind = ? ORDER BY is_open DESC, name").all(kind)
+      : db.prepare("SELECT * FROM restaurants WHERE status = 'approved' ORDER BY is_open DESC, name").all();
+    return { restaurants: rows.map(toRestaurant) };
+  });
 
   route('GET', '/api/restaurants/:id', null, ({ params }) => {
     const r = db.prepare("SELECT * FROM restaurants WHERE id = ? AND status = 'approved'").get(Number(params.id));
@@ -217,8 +230,10 @@ export function createApp(opts = {}) {
     if (password.length < 8 || password.length > 200) throw bad('Le mot de passe doit contenir au moins 8 caractères');
     const phone = str(body.phone, 'Le téléphone', role === 'client' ? 0 : 8, 20);
     if (phone && !PHONE_RE.test(phone)) throw bad('Le numéro de téléphone est invalide');
-    let restaurantName = '', restaurantAddress = '';
+    let restaurantName = '', restaurantAddress = '', restaurantKind = 'repas';
     if (role === 'restaurant') {
+      restaurantKind = body.restaurantKind ?? 'repas';
+      if (!KIND_IDS.includes(restaurantKind)) throw bad('Catégorie de commerce invalide');
       restaurantName = str(body.restaurantName, 'Le nom du restaurant', 2, 80);
       restaurantAddress = str(body.restaurantAddress, "L'adresse du restaurant", 5, 200);
     }
@@ -227,8 +242,8 @@ export function createApp(opts = {}) {
       const id = db.prepare('INSERT INTO users (email, password_hash, name, phone, role) VALUES (?, ?, ?, ?, ?)')
         .run(email, hashPassword(password), name, phone, role).lastInsertRowid;
       if (role === 'restaurant') {
-        db.prepare("INSERT INTO restaurants (owner_id, name, address, phone, status) VALUES (?, ?, ?, ?, 'pending')")
-          .run(id, restaurantName, restaurantAddress, phone);
+        db.prepare("INSERT INTO restaurants (owner_id, name, address, phone, status, kind) VALUES (?, ?, ?, ?, 'pending', ?)")
+          .run(id, restaurantName, restaurantAddress, phone, restaurantKind);
       }
       return id;
     });
@@ -491,7 +506,7 @@ export function createApp(opts = {}) {
         const params = {};
         r.keys.forEach((k, i) => { params[k] = m[i + 1]; });
         const body = (req.method === 'GET' || req.method === 'DELETE' || r.raw) ? {} : await readJson(req);
-        const out = await r.handler({ req, res, user, params, body });
+        const out = await r.handler({ req, res, user, params, body, query: url.searchParams });
         return send(res, 200, out);
       } catch (e) {
         if (e instanceof HttpError) return send(res, e.status, { error: e.message });

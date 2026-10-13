@@ -16,7 +16,7 @@ const thumb = (u, cls = 'thumb') => safeImg(u)
   ? `<img class="${cls}" src="${esc(safeImg(u))}" alt="" loading="lazy">` : `<div class="${cls}">🍽️</div>`;
 
 // ---------- État ----------
-const state = { user: null, restaurant: null, config: { deliveryFee: 500 }, pending: 0, draft: {}, nextHash: null };
+const state = { user: null, restaurant: null, config: { deliveryFee: 500, kinds: [] }, kind: 'all', pending: 0, draft: {}, nextHash: null };
 let cart = { restaurantId: null, restaurantName: '', items: [] };
 try { const c = JSON.parse(localStorage.getItem('fd_cart') || 'null'); if (c && Array.isArray(c.items)) cart = c; } catch { /* panier vide */ }
 const saveCart = () => { try { localStorage.setItem('fd_cart', JSON.stringify(cart)); } catch { /* ignore */ } };
@@ -58,7 +58,7 @@ function renderChrome() {
   } else if (u && u.role === 'admin') {
     items = [['#/admin', '📊', 'Tableau'], ['#/admin/restaurants', '🏪', 'Restaurants'], ['#/admin/orders', '📋', 'Commandes']];
   } else {
-    items = [['#/', '🍽️', 'Restaurants'], ['#/cart', '🛒', 'Panier', cartCount()],
+    items = [['#/', '🍽️', 'Commerces'], ['#/cart', '🛒', 'Panier', cartCount()],
       u ? ['#/orders', '📋', 'Commandes'] : ['#/login', '👤', 'Connexion']];
   }
   $('#nav').innerHTML = items.map(([href, ico, label, badge]) => {
@@ -79,16 +79,22 @@ const needLogin = (role) => {
 };
 
 // ================= CLIENT =================
+const kindLabel = (id) => { const k = (state.config.kinds || []).find((x) => x.id === id); return k ? `${k.icon} ${k.label}` : ''; };
 async function viewHome() {
   if (state.user?.role === 'restaurant') { location.hash = '#/pro'; return null; }
   if (state.user?.role === 'admin') { location.hash = '#/admin'; return null; }
-  const { restaurants } = await api('GET', '/api/restaurants');
-  if (!restaurants.length) return '<h1>Restaurants</h1>' + empty('🍽️', 'Aucun restaurant disponible pour le moment.');
-  return '<h1>Que voulez-vous manger ?</h1>' + restaurants.map((r) => `
+  const kinds = state.config.kinds || [];
+  if (state.kind !== 'all' && !kinds.some((k) => k.id === state.kind)) state.kind = 'all';
+  const { restaurants } = await api('GET', '/api/restaurants' + (state.kind !== 'all' ? '?kind=' + encodeURIComponent(state.kind) : ''));
+  const chips = kinds.length > 1
+    ? `<div class="tabs">${[{ id: 'all', label: 'Tout', icon: '✨' }, ...kinds].map((k) => `<a href="#/" data-act="kind" data-kind="${esc(k.id)}" class="${state.kind === k.id ? 'active' : ''}">${k.icon} ${esc(k.label)}</a>`).join('')}</div>` : '';
+  if (!restaurants.length) return '<h1>Que voulez-vous commander ?</h1>' + chips + empty('🍽️', 'Aucun commerce disponible dans cette catégorie pour le moment.');
+  return '<h1>Que voulez-vous commander ?</h1>' + chips + restaurants.map((r) => `
     <a class="card resto" href="#/r/${r.id}">
       ${thumb(r.imageUrl)}
       <div class="grow">
         <div class="row between"><h3>${esc(r.name)}</h3><span class="pill ${r.isOpen ? 'open' : 'closed'}">${r.isOpen ? 'Ouvert' : 'Fermé'}</span></div>
+        <p class="muted small">${esc(kindLabel(r.kind))}</p>
         <p class="muted small">${esc(r.description)}</p>
         <p class="muted small">📍 ${esc(r.address)}</p>
       </div>
@@ -111,7 +117,7 @@ function restaurantHtml(d) {
   }).join('')).join('');
   const bar = cartCount() && cart.restaurantId === r.id
     ? `<a class="btn cartbar" href="#/cart"><span>🛒 Voir mon panier (${cartCount()})</span><span>${money(cartSubtotal())}</span></a>` : '';
-  return `<p><a href="#/">← Restaurants</a></p>
+  return `<p><a href="#/">← Retour</a></p>
     <div class="card"><div class="hero">${safeImg(r.imageUrl) ? `<img src="${esc(safeImg(r.imageUrl))}" alt="">` : '🍽️'}</div>
     <div class="pad-in" style="padding:.9rem"><div class="row between"><h1 style="margin:0">${esc(r.name)}</h1><span class="pill ${r.isOpen ? 'open' : 'closed'}">${r.isOpen ? 'Ouvert' : 'Fermé'}</span></div>
     <p class="muted">${esc(r.description)}</p><p class="muted small">📍 ${esc(r.address)}</p></div></div>
@@ -219,23 +225,25 @@ function viewLogin() {
     <button class="btn block mt" type="submit">Se connecter</button></form>
     <p class="center mt">Pas encore de compte ?</p>
     <a class="btn alt block" href="#/register">Créer un compte client</a>
-    <p class="center mt"><a href="#/register/restaurant">Je suis un restaurant : rejoindre First Delivery</a></p>`;
+    <p class="center mt"><a href="#/register/restaurant">Je suis un commerce : rejoindre First Delivery</a></p>`;
 }
 function viewRegister(kind) {
   if (state.user) { location.hash = '#/'; return null; }
   const resto = kind === 'restaurant';
-  return `<h1>${resto ? 'Inscrire mon restaurant' : 'Créer un compte client'}</h1>
+  return `<h1>${resto ? 'Inscrire mon commerce' : 'Créer un compte client'}</h1>
     ${resto ? '<div class="notice info">Après votre inscription, l’équipe First Delivery valide votre restaurant avant qu’il soit visible des clients. Vous pouvez préparer votre menu dès maintenant.</div>' : ''}
     <form data-form="register" data-role="${resto ? 'restaurant' : 'client'}">
-    ${resto ? `<label for="restaurantName">Nom du restaurant</label><input id="restaurantName" name="restaurantName" required maxlength="80">
-    <label for="restaurantAddress">Adresse du restaurant</label><input id="restaurantAddress" name="restaurantAddress" required maxlength="200" placeholder="Ville, secteur, repère">` : ''}
+    ${resto ? `<label for="restaurantKind">Type de commerce</label>
+    <select id="restaurantKind" name="restaurantKind">${(state.config.kinds || []).map((k) => `<option value="${esc(k.id)}">${k.icon} ${esc(k.label)}</option>`).join('')}</select>
+    <label for="restaurantName">Nom du commerce</label><input id="restaurantName" name="restaurantName" required maxlength="80">
+    <label for="restaurantAddress">Adresse du commerce</label><input id="restaurantAddress" name="restaurantAddress" required maxlength="200" placeholder="Ville, secteur, repère">` : ''}
     <label for="name">${resto ? 'Votre nom (responsable)' : 'Votre nom'}</label><input id="name" name="name" required maxlength="80" autocomplete="name">
     <label for="phone">Téléphone${resto ? '' : ' (facultatif)'}</label><input id="phone" name="phone" type="tel" ${resto ? 'required' : ''} autocomplete="tel" placeholder="70 00 00 00">
     <label for="email">Adresse e-mail</label><input id="email" name="email" type="email" required autocomplete="email" autocapitalize="none">
     <label for="password">Mot de passe (8 caractères minimum)</label><input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
     <button class="btn block mt" type="submit">Créer mon compte</button></form>
     <p class="center mt"><a href="#/login">J’ai déjà un compte</a></p>
-    <p class="center"><a href="${resto ? '#/register' : '#/register/restaurant'}">${resto ? 'Je suis un client' : 'Je suis un restaurant'}</a></p>`;
+    <p class="center"><a href="${resto ? '#/register' : '#/register/restaurant'}">${resto ? 'Je suis un client' : 'Je suis un commerce'}</a></p>`;
 }
 
 // ================= RESTAURANT =================
@@ -405,6 +413,7 @@ document.addEventListener('click', async (ev) => {
   try {
     if (act === 'logout') { await api('POST', '/api/auth/logout', {}); state.user = null; state.restaurant = null; location.hash = '#/'; await render(); }
     else if (act === 'reload') { location.reload(); }
+    else if (act === 'kind') { ev.preventDefault(); state.kind = el.dataset.kind; await render(); }
     else if (act === 'add') { cartAdd(id); repaintResto(); }
     else if (act === 'inc') { cartChange(id, 1); repaintResto(); }
     else if (act === 'dec') { cartChange(id, -1); repaintResto(); }
